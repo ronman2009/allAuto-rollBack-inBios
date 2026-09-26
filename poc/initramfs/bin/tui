@@ -27,16 +27,11 @@ sz=$(stty size 2>/dev/null)
 [ -n "$sz" ] && { ROWS=${sz% *}; COLS=${sz#* }; }
 stty raw -echo 2>/dev/null
 
-# ---- geometry: content-sized panel, centered both axes ----
-LR=$CNT; [ "$LR" -gt 12 ] && LR=12          # max visible list rows
-PH=$((LR + 8))                               # rows: top+hdr+blank+colhdr+LR+foot+note+bottom
-[ "$PH" -ge "$ROWS" ] && { LR=$((ROWS - 9)); PH=$((LR + 8)); }
+# ---- geometry: panel width (height needs CNT, computed after enumeration) ----
 PW=$((COLS - 4)); [ "$PW" -gt 96 ] && PW=96
 PX=$(( (COLS - PW) / 2 + 1 ))
-PY=$(( (ROWS - PH) / 2 + 1 ))
 LW=48
 RW=$((PW - LW - 2))
-CAP=$LR
 
 pad() { printf '%-*.*s' "$2" "$2" "$1"; }
 hline() { printf '%*s' "$1" '' | tr ' ' '-'; }
@@ -81,6 +76,13 @@ for n in $NAMES; do CNT=$((CNT + 1)); done
 
 IDX=$CNT
 OFF=1
+
+# ---- geometry needing CNT: content-sized panel, centered both axes ----
+LR=$CNT; [ "$LR" -gt 12 ] && LR=12          # max visible list rows
+PH=$((LR + 8))                               # top+hdr+blank+colhdr+LR+foot+note+bottom
+[ "$PH" -ge "$ROWS" ] && { LR=$((ROWS - 9)); PH=$((LR + 8)); }
+PY=$(( (ROWS - PH) / 2 + 1 ))
+CAP=$LR
 
 tag_of() {
     f=$(getfield tags "$SNAP_DIR/$1/info.json")
