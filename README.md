@@ -48,7 +48,25 @@ flowchart LR
 **TUI（默认）**——双栏布局：左侧快照列表（tag + ESP 归档标记），右侧所选
 快照详情（备注 / live / 子卷 ID / ESP 归档状态），底部全功能键提示条：
 
-![TUI 截图](docs/screenshots/tui.png)
+实际渲染输出（headless 跑真实 draw 代码生成，非设计稿）：
+
+```text
+  +----------------------------------------------------------------------+
+  | BTRFS RESCUE - /dev/nvme0n1p2 - 9 snapshots - restore mode           |
+  |                                                |                     |
+  | SNAPSHOT                       TAG        ESP  | DETAIL              |
+  |  2026-09-26_17-40-48 autosnap  -               | DETAIL              |
+  |  2026-09-26_19-21-51 autosnap  -               | name    2026-09-26_2|
+  |  2026-09-26_19-23-51 ondemand  tar.gz          | tag     ondemand    |
+  |  2026-09-26_19-25-50 ondemand  -               | comment Before resto|
+  |  2026-09-26_19-38-46 autosnap  -               | live    true        |
+  |  2026-09-26_19-49-19 autosnap  -               | subvol  ?           |
+  |  2026-09-26_20-20-20 ondemand  -               | esp     * tar.gz    |
+  |  2026-09-26_20-21-28 ondemand  tar.gz          | info.json OK        |
+  |>  2026-09-26_21-18-04 ondemand  tar.gz         |                     |
+  | Up/Dn select | ENTER restore | R recover | S shell | P poweroff      |
+  | restore = @ swap + ESP writeback. @home is NEVER touched.            |
+```
 
 - `↑↓` 选择 · `ENTER` 回滚（二次确认）· `R` 自愈模式 · `S` 落回 shell · `P` 关机
 - 回滚完成后**自动倒计时重启**，全程不碰键盘

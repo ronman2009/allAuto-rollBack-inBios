@@ -79,6 +79,7 @@ OFF=1
 
 # ---- geometry needing CNT: content-sized panel, centered both axes ----
 LR=$CNT; [ "$LR" -gt 12 ] && LR=12          # max visible list rows
+[ "$LR" -lt 8 ] && LR=8                     # minimum: detail pane needs 8 rows
 PH=$((LR + 8))                               # top+hdr+blank+colhdr+LR+foot+note+bottom
 [ "$PH" -ge "$ROWS" ] && { LR=$((ROWS - 9)); PH=$((LR + 8)); }
 PY=$(( (ROWS - PH) / 2 + 1 ))
@@ -96,7 +97,22 @@ has_esp() { ls "$SNAP_DIR/$1/@/.recovery/"esp-*.tar.gz >/dev/null 2>&1; }
 
 # ---------- draw ----------
 draw() {
+    # phase 1: resolve selected snapshot
     SEL_NAME=""
+    k=0
+    for n in $NAMES; do
+        k=$((k + 1))
+        [ "$k" = "$IDX" ] && { SEL_NAME="$n"; break; }
+    done
+    [ -n "$SEL_NAME" ] || SEL_NAME=$(echo $NAMES | awk '{print $NF}')
+    # phase 2: compute detail fields for the selection
+    INFO="$SNAP_DIR/$SEL_NAME/info.json"
+    INFO_OK="-"; [ -f "$INFO" ] && INFO_OK="OK"
+    C=$(getfield comments "$INFO"); [ -n "$C" ] || C="-"
+    L=$(getfield live "$INFO"); [ -n "$L" ] || L="-"
+    SV=$($BTRFS subvolume list $R 2>/dev/null | awk -v s="$SEL_NAME" '$0 ~ "path timeshift-btrfs/snapshots/"s"/@$" {print $2}')
+    if has_esp "$SEL_NAME"; then E="* tar.gz"; else E="-"; fi
+    # phase 3: render
     printf '\033[H\033[2J\033[?25l'
 
     printf '\033[%d;%dH+%s+' "$PY" "$PX" "$(hline $((PW - 2)))"
@@ -122,8 +138,8 @@ draw() {
         r=$((PY + 4 + dr))
         T=$(tag_of "$n")
         if has_esp "$n"; then EE="tar.gz"; else EE="-"; fi
-        LEFT="  $n"
-        [ "$k" = "$IDX" ] && { LEFT="> $n"; SEL_NAME="$n"; }
+        LEFT=$(printf '  %-19s %-9s %-7s' "$n" "$T" "$EE")
+        [ "$k" = "$IDX" ] && { LEFT=">$LEFT"; SEL_NAME="$n"; }
         RIGHT=""
         case $dr in
             0) RIGHT=" DETAIL" ;;
