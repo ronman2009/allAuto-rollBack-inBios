@@ -211,9 +211,4 @@ echo "  ROLLBACK OK ($MODE) -> $SEL"
 [ "$MODE" = "restore" ] && echo "  previous system: snapshots/$NOW (rollback-able)"
 echo "  reboot to boot into restored system: reboot"
 echo "=============================================="
-if [ "${ROLLBACK_FROM:-cli}" = "tui" ]; then
-    echo "* rebooting in 5s (hold CTRL+C to abort)..."
-    sleep 5
-    exec /bin/busybox reboot -f
-fi
 exec sh

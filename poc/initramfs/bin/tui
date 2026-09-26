@@ -24,14 +24,19 @@ trap cleanup_tty EXIT INT TERM
 
 ROWS=24; COLS=80
 sz=$(stty size 2>/dev/null)
-[ -n "${sz:-}" ] && { ROWS=${sz% *}; COLS=${sz#* }; }
+[ -n "$sz" ] && { ROWS=${sz% *}; COLS=${sz#* }; }
 stty raw -echo 2>/dev/null
 
-# ---- geometry: panel width (height needs CNT, computed after enumeration) ----
+# ---- geometry: content-sized panel, centered both axes ----
+LR=$CNT; [ "$LR" -gt 12 ] && LR=12          # max visible list rows
+PH=$((LR + 8))                               # rows: top+hdr+blank+colhdr+LR+foot+note+bottom
+[ "$PH" -ge "$ROWS" ] && { LR=$((ROWS - 9)); PH=$((LR + 8)); }
 PW=$((COLS - 4)); [ "$PW" -gt 96 ] && PW=96
 PX=$(( (COLS - PW) / 2 + 1 ))
+PY=$(( (ROWS - PH) / 2 + 1 ))
 LW=48
-RW=$((PW - LW - 3))
+RW=$((PW - LW - 2))
+CAP=$LR
 
 pad() { printf '%-*.*s' "$2" "$2" "$1"; }
 hline() { printf '%*s' "$1" '' | tr ' ' '-'; }
@@ -77,13 +82,6 @@ for n in $NAMES; do CNT=$((CNT + 1)); done
 IDX=$CNT
 OFF=1
 
-# ---- geometry needing CNT: content-sized panel, centered both axes ----
-LR=$CNT; [ "$LR" -gt 12 ] && LR=12          # max visible list rows
-PH=$((LR + 8))                               # top+hdr+blank+colhdr+LR+foot+note+bottom
-[ "$PH" -ge "$ROWS" ] && { LR=$((ROWS - 9)); PH=$((LR + 8)); }
-PY=$(( (ROWS - PH) / 2 + 1 ))
-CAP=$LR
-
 tag_of() {
     f=$(getfield tags "$SNAP_DIR/$1/info.json")
     case "$f" in
@@ -96,14 +94,22 @@ has_esp() { ls "$SNAP_DIR/$1/@/.recovery/"esp-*.tar.gz >/dev/null 2>&1; }
 
 # ---------- draw ----------
 draw() {
-    SEL_NAME=""
+    SEL_NAME=$(eval echo \${$IDX})
     printf '\033[H\033[2J\033[?25l'
 
     printf '\033[%d;%dH+%s+' "$PY" "$PX" "$(hline $((PW - 2)))"
     H=" BTRFS RESCUE - /dev/nvme0n1p2 - ${CNT} snapshots - restore mode"
     printf '\033[%d;%dH|\033[7m%s\033[0m|' "$((PY + 1))" "$PX" "$(pad "$H" $((PW - 2)))"
     prow "$((PY + 2))" "" ""
-    prow "$((PY + 3))" " SNAPSHOT                       TAG        ESP" ""
+    prow "$((PY + 3))" " SNAPSHOT                       TAG        ESP" " DETAIL"
+
+    INFO="$SNAP_DIR/$SEL_NAME/info.json"
+    INFO_OK="-"
+    [ -f "$INFO" ] && INFO_OK="OK"
+    C=$(getfield comments "$INFO"); [ -n "$C" ] || C="-"
+    L=$(getfield live "$INFO"); [ -n "$L" ] || L="-"
+    SV=$($BTRFS subvolume list $R 2>/dev/null | awk -v s="$SEL_NAME" '$0 ~ "path timeshift-btrfs/snapshots/"s"/@$" {print $2}')
+    if has_esp "$SEL_NAME"; then E="* tar.gz"; else E="-"; fi
 
     k=0
     dr=0
@@ -115,16 +121,7 @@ draw() {
         T=$(tag_of "$n")
         if has_esp "$n"; then EE="tar.gz"; else EE="-"; fi
         LEFT="  $n"
-        if [ "$k" = "$IDX" ]; then
-            LEFT="> $n"
-            SEL_NAME="$n"
-            INFO="$SNAP_DIR/$n/info.json"
-            INFO_OK="-"; [ -f "$INFO" ] && INFO_OK="OK"
-            C=$(getfield comments "$INFO"); [ -n "$C" ] || C="-"
-            L=$(getfield live "$INFO"); [ -n "$L" ] || L="-"
-            SV=$($BTRFS subvolume list $R 2>/dev/null | awk -v s="$n" '$0 ~ "path timeshift-btrfs/snapshots/"s"/@$" {print $2}')
-            if has_esp "$n"; then E="* tar.gz"; else E="-"; fi
-        fi
+        [ "$k" = "$IDX" ] && LEFT="> $n"
         RIGHT=""
         case $dr in
             0) RIGHT=" DETAIL" ;;
@@ -172,18 +169,15 @@ while :; do
         UP)   [ "$IDX" -gt 1 ] && { IDX=$((IDX - 1)); [ "$IDX" -lt "$OFF" ] && OFF=$IDX; } ;;
         DOWN) [ "$IDX" -lt "$CNT" ] && { IDX=$((IDX + 1)); [ "$IDX" -ge $((OFF + CAP)) ] && OFF=$((IDX - CAP + 1)); } ;;
         ENTER)
-            if [ -n "$SEL_NAME" ] && confirm; then
+            SEL_NAME=$(eval echo \${$IDX})
+            if confirm; then
                 cleanup_tty
                 printf '\033[2J\033[H\033[?25h'
-                ROLLBACK_FROM=tui
-                export ROLLBACK_FROM
                 exec /bin/rollback "$SEL_NAME" --yes
             fi ;;
         RECOVER)
             cleanup_tty
             printf '\033[2J\033[H\033[?25h'
-            ROLLBACK_FROM=tui
-            export ROLLBACK_FROM
             exec /bin/rollback --recover "$SEL_NAME" --yes ;;
         SHELL)
             cleanup_tty
