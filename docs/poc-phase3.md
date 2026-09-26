@@ -1,6 +1,27 @@
 # POC 阶段 3：快照回滚操作手册
 
-日期：2026-09-26 · 状态：代码就绪，待实机验证
+日期：2026-09-26 · 状态：**已实机验收通过**（19:49 实测：全链成功，含 ESP 回写）
+
+## 验收记录（2026-09-26 19:49）
+
+```
+* loading modules... + nvme-keyring + nvme-auth + nvme-core + nvme + fat + vfat
+* root btrfs: /dev/nvme0n1p2 (subvolid=5, RO -> /mnt/rootfs)
+rollback -> 选快照 [3] -> PLAN(含 ESP writeback) -> y
+* writable copy ready at @.new-restore (system still intact)
+* swap done
+* verified: new @ active (subvol id 276)
+* ESP archive found in snapshot: esp-2026-09-26_19-23-51.tar.gz
+* current ESP backed up into pre-restore snapshot
+* ESP overwritten from archive
+* GRUB blind-spot closed: ESP matches /boot/grub of 2026-09-26_19-23-51
+ROLLBACK OK (restore) -> 2026-09-26_19-23-50
+```
+
+关键修复史：① initramfs 缺 /dev/console → 黑屏（make-cpio.py 注入设备节点）；
+② NVMe/FAT/vfat 均为内核模块 → kernel-store 统一钉入；③ mkdir /mnt/esp 缺失 +
+④ 拆解态检测变量误用 → 双双修复后全链通过。完整事故与教训见
+[incident-01](incident-01.md)、[lessons-01](lessons-01.md)。
 
 ## 语义来源（已核对 Timeshift 源码，ref/ 目录留档）
 
