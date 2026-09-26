@@ -212,6 +212,10 @@ echo "  ROLLBACK OK ($MODE) -> $SEL"
 echo "  reboot to boot into restored system: reboot"
 echo "=============================================="
 if [ "${ROLLBACK_FROM:-cli}" = "tui" ]; then
+    echo "* flushing filesystem to disk..."
+    sync
+    mount -o remount,ro /mnt/rootfs 2>/dev/null && echo "* rootfs safely remounted read-only"
+    sync
     echo "* rebooting in 5s (hold CTRL+C to abort)..."
     sleep 5
     exec /bin/busybox reboot -f
