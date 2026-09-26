@@ -1,0 +1,10 @@
+#!/bin/sh
+# ============================================================
+# rescue-snapshot - 手动打"整体快照"的标准入口
+# ESP 归档 -> Timeshift 快照，二者原子一致（Linux + GRUB 整体）
+# 用法: sudo rescue-snapshot --comments "说明" [--tags O/D/W/M]
+# ============================================================
+set -eu
+[ "$(id -u)" -eq 0 ] || { echo "need root"; exit 1; }
+/usr/local/bin/rescue-esp-archive.sh
+exec timeshift --create "$@"

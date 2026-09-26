@@ -1,0 +1,205 @@
+#!/bin/busybox sh
+# ============================================================
+# rollback - POC phase 3 (v3: snapshot-first 序列)
+# ============================================================
+# v3 核心改进（16:11 事故复盘，全链路见 docs/lessons-01.md）:
+#   旧序列(危险): mv @ -> snapshot 落位   [btrfs 失败 = 系统停在拆解态]
+#   新序列(安全): 先 snapshot 到 @.new-restore（系统完整时完成全部 ioctl）
+#                再两条连续 rename 换位（破坏性窗口 ~毫秒，任一步失败立即可逆）
+#   + --recover 模式: 检测 @ 缺位（拆解态）时直接从快照重建 @，无需 live USB
+#   + preflight 硬门禁: 所有工具验证通过才允许任何写操作
+# 语义对齐 Timeshift restore_execute_btrfs()（ref/ 源码留档）
+# 运行时输出 ASCII-only（console 无 CJK 字体）
+# 用法: rollback [--recover] [快照名] [--yes]
+# ============================================================
+set -u
+export PATH=/bin
+export TZ=CST-8
+R=/mnt/rootfs
+SNAP_DIR=$R/timeshift-btrfs/snapshots
+ROOT_UUID=d505eb2e-6552-43d0-aa7a-529d4e046abd
+BTRFS=/bin/btrfs
+NEW=$R/@.new-restore
+
+fail() { echo "!! $1"; [ -n "${2:-}" ] && echo "!! $2"; exit 1; }
+
+# ---- 0. preflight HARD GATE ----
+grep -q " /mnt/rootfs btrfs " /proc/mounts || \
+    fail "rootfs not mounted (reboot into rescue first)"
+for t in mv awk grep date; do
+    command -v "$t" >/dev/null 2>&1 || fail "required tool missing: $t"
+done
+$BTRFS --version >/dev/null 2>&1 || fail "btrfs not executable: $BTRFS"
+
+# ---- 1. mode ----
+MODE="restore"
+if [ "${1:-}" = "--recover" ]; then
+    MODE="recover"
+fi
+
+# ---- 2. list candidates ----
+i=0
+LIST=""
+for d in "$SNAP_DIR"/*/; do
+    [ -d "${d}@" ] || continue
+    n=$(basename "$d")
+    LIST="$LIST $n"
+    i=$((i + 1))
+    echo "  [$i] $n"
+done
+[ -n "$LIST" ] || fail "no snapshots with @ subvolume found"
+
+# ---- 3. select: index or name, Enter=newest ----
+SEL="${2:-}"
+if [ -z "$SEL" ]; then
+    printf "Select snapshot [1-%d, Enter=newest]: " "$i"
+    read PICK
+    [ -n "$PICK" ] || PICK=$i
+    case "$PICK" in
+        *[!0-9]*) SEL="$PICK" ;;
+        *) k=0
+           for n in $LIST; do
+               k=$((k + 1))
+               [ "$k" = "$PICK" ] && SEL="$n"
+           done ;;
+    esac
+fi
+[ -d "$SNAP_DIR/$SEL/@" ] || fail "snapshot not found: $SEL"
+echo "* selected: $SEL"
+
+# ---- 4. state check / mode coercion ----
+AT_EXISTS=""
+[ -d "$R/@" ] && AT_EXISTS=1
+if [ "$MODE" = "restore" ] && [ -z "$AT_EXISTS" ]; then
+    echo "! @ missing at root - system appears TORN DOWN"
+    echo "! auto-switching to recover mode (rebuild @ from snapshot)"
+    MODE="recover"
+fi
+if [ "$MODE" = "recover" ] && [ -n "$AT_EXISTS" ]; then
+    fail "@ exists at root - recover mode would discard it. use normal rollback."
+fi
+
+# ---- 5. plan ----
+NOW=$(date +%Y-%m-%d_%H-%M-%S)
+PRE_DIR=$SNAP_DIR/$NOW
+if [ "$MODE" = "restore" ]; then
+cat <<EOF
+
+=============== PLAN (restore) ===============
+ 1) $BTRFS subvolume snapshot $SNAP_DIR/$SEL/@ -> @.new-restore
+    (all btrfs work done while system is INTACT)
+ 2) mv @ -> timeshift-btrfs/snapshots/$NOW/@   (pre-restore backup)
+ 3) mv @.new-restore -> @                      (two renames, ms-level window)
+ 4) ESP writeback if archive present (GRUB blind-spot)
+ 5) @home / @cache / @log untouched
+ any failure before step-2 = system untouched; failure inside 2-3 auto-reverts
+==============================================
+EOF
+else
+cat <<EOF
+
+=============== PLAN (RECOVER) ===============
+ ! @ is missing (torn-down state). NO backup possible.
+ 1) $BTRFS subvolume snapshot $SNAP_DIR/$SEL/@ -> @
+ 2) torn-down intermediate state will be discarded
+==============================================
+EOF
+fi
+
+if [ "${3:-}" != "--yes" ]; then
+    printf "Proceed? (y/N): "
+    read ANSWER
+    case "$ANSWER" in
+        y|Y|yes|YES) ;;
+        *) echo "cancelled."; exit 1 ;;
+    esac
+fi
+
+# ---- 6. remount rw ----
+mount -o remount,rw $R || fail "remount rw failed"
+echo "* rootfs remounted rw"
+
+# ---- 7. execute ----
+if [ "$MODE" = "restore" ]; then
+    # 7a. 清理上次失败残留的 .new-restore（专属名字，安全删除）
+    if [ -d "$NEW" ]; then
+        echo "* removing stale $NEW from a previous failed run"
+        $BTRFS subvolume delete "$NEW" 2>/dev/null || rm -rf "$NEW" 2>/dev/null
+    fi
+
+    # 7b. 所有 btrfs 工作在系统完整时完成
+    SUBVOL_ID=$($BTRFS subvolume list $R | awk '$NF == "@" {print $2}')
+    DISTRO=$(grep -m1 '^PRETTY_NAME=' "$R/@/etc/os-release" 2>/dev/null | cut -d'"' -f2)
+    mkdir -p "$PRE_DIR" || fail "cannot create $PRE_DIR"
+    cat > "$PRE_DIR/info.json" <<EOF
+{
+  "created": "$(date +%s)",
+  "sys-uuid": "$ROOT_UUID",
+  "sys-distro": "${DISTRO:-Manjaro Linux}",
+  "app-version": "25.12.4",
+  "file_count": "0",
+  "tags": "ondemand",
+  "comments": "Before restoring '$SEL'",
+  "live": "true",
+  "type": "btrfs",
+  "subvolumes": {
+    "@": ["@", "${SUBVOL_ID:-256}", "0", "0", "$ROOT_UUID"]
+  }
+}
+EOF
+    $BTRFS subvolume snapshot "$SNAP_DIR/$SEL/@" "$NEW" || \
+        fail "pre-copy failed (system untouched)" "cleanup: $BTRFS subvolume delete $NEW"
+    echo "* writable copy ready at @.new-restore (system still intact)"
+
+    # 7c. 破坏性窗口：两条连续 rename，任一失败立即自逆转
+    mv "$R/@" "$PRE_DIR/@" || {
+        $BTRFS subvolume delete "$NEW" 2>/dev/null
+        fail "rename 1 failed (system untouched)"
+    }
+    mv "$NEW" "$R/@" || {
+        mv "$PRE_DIR/@" "$R/@"   # auto-revert
+        [ -d "$R/@" ] && echo "* auto-reverted: @ restored"
+        $BTRFS subvolume delete "$NEW" 2>/dev/null
+        fail "rename 2 failed (auto-reverted)"
+    }
+    echo "* swap done"
+else
+    # recover: @ 缺位，直接从所选快照重建（无法备份，现场本就是残局）
+    $BTRFS subvolume snapshot "$SNAP_DIR/$SEL/@" "$R/@" || \
+        fail "recover snapshot failed"
+fi
+
+# ---- 8. verify ----
+[ -f "$R/@/etc/os-release" ] || fail "verify failed: @/etc/os-release missing"
+NEW_ID=$($BTRFS subvolume list $R | awk '$NF == "@" {print $2}')
+echo "* verified: new @ active (subvol id ${NEW_ID:-?})"
+
+# ---- 9. ESP writeback (GRUB blind-spot closure) ----
+# 归档随目标快照走（ parasite archive in @/.recovery/ ）——回滚到哪个时刻，
+# GRUB 就回到哪个时刻的版本，与 /boot/grub 保持一致，杜绝版本错配。
+ARCHIVE=$(ls -1 "$R/@/.recovery/"esp-*.tar.gz 2>/dev/null | tail -1)
+if [ -n "$ARCHIVE" ]; then
+    echo "* ESP archive found in snapshot: $(basename "$ARCHIVE")"
+    if mount -t vfat /dev/nvme0n1p3 /mnt/esp 2>/dev/null; then
+        tar czf "$PRE_DIR/esp-before-restore.tar.gz" -C /mnt/esp . 2>/dev/null \
+            && echo "* current ESP backed up into pre-restore snapshot"
+        tar xzf "$ARCHIVE" -C /mnt/esp && echo "* ESP overwritten from archive"
+        sync
+        umount /mnt/esp
+        echo "* GRUB blind-spot closed: ESP matches /boot/grub of $SEL"
+    else
+        echo "! ESP mount failed - skipping writeback (system @ is fine)"
+    fi
+else
+    echo "! no ESP archive in this snapshot (pre-hook not installed at snapshot time)"
+    echo "! ESP left untouched - /boot/grub vs grubx64.efi may be version-skewed"
+fi
+
+sync
+echo
+echo "=============================================="
+echo "  ROLLBACK OK ($MODE) -> $SEL"
+[ "$MODE" = "restore" ] && echo "  previous system: snapshots/$NOW (rollback-able)"
+echo "  reboot to boot into restored system: reboot"
+echo "=============================================="
+exec sh

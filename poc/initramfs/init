@@ -1,0 +1,100 @@
+#!/bin/busybox sh
+# ============================================================
+# btrfs rescue - POC phase 1 (v2)
+# independent of GRUB / main OS. PID1 = this script.
+# v2: nvme 模块加载 + 设备发现双路径 + setsid -c 控制台接管
+# ============================================================
+export PATH=/bin
+export TZ=CST-8
+/bin/busybox --install -s /bin 2>/dev/null
+
+mkdir -p /proc /sys /dev /tmp /mnt/rootfs
+mount -t proc proc /proc
+mount -t sysfs sysfs /sys
+mount -t devtmpfs devtmpfs /dev 2>/dev/null
+mdev -s
+
+clear
+echo "=============================================="
+echo "  BTRFS RESCUE  -  POC phase 1 (v2)"
+echo "  boot path: UEFI -> EFISTUB UKI (no GRUB)"
+echo "=============================================="
+
+ROOT_UUID=d505eb2e-6552-43d0-aa7a-529d4e046abd
+
+# 1. NVMe 驱动是模块(CONFIG_BLK_DEV_NVME=m)，initramfs 必须自加载
+echo "* loading nvme modules..."
+for m in nvme-keyring nvme-auth nvme-core nvme; do
+    if insmod "/modules/$m.ko" 2>/dev/null; then
+        echo "    + $m"
+    else
+        echo "    ! $m load failed (vermagic mismatch?)"
+    fi
+done
+
+# 2. 等待 nvme 设备节点出现（模块加载后需要几秒）
+i=0
+while [ $i -lt 10 ]; do
+    grep -q nvme /proc/partitions 2>/dev/null && break
+    mdev -s
+    sleep 1
+    i=$((i + 1))
+done
+mdev -s
+
+# 3. 设备发现：路径A = blkid 按 UUID；路径B = 暴力试探挂载
+DEV=""
+MOUNTED=""
+DEV=$(blkid 2>/dev/null | grep "UUID=\"$ROOT_UUID\"" | cut -d: -f1 | head -1)
+if [ -z "$DEV" ]; then
+    echo "* blkid 未命中，尝试逐个探测 btrfs 盘根..."
+    for cand in /dev/nvme*n*p* /dev/sd*[0-9]; do
+        [ -b "$cand" ] || continue
+        if mount -t btrfs -o subvolid=5,ro "$cand" /mnt/rootfs 2>/dev/null; then
+            if [ -d /mnt/rootfs/timeshift-btrfs ]; then
+                DEV="$cand"
+                MOUNTED=1
+                echo "    + $cand 命中（含 timeshift-btrfs）"
+                break
+            fi
+            umount /mnt/rootfs
+        fi
+    done
+fi
+
+if [ -z "$DEV" ]; then
+    echo "! root btrfs device (UUID=$ROOT_UUID) not found"
+    echo "! block devices:"
+    cat /proc/partitions
+    echo "! dropping to shell for manual inspection"
+elif [ -z "$MOUNTED" ]; then
+    if mount -t btrfs -o subvolid=5,ro "$DEV" /mnt/rootfs 2>/dev/null; then
+        MOUNTED=1
+    else
+        echo "! found $DEV but mount failed - dropping to shell"
+    fi
+fi
+
+if [ -n "$MOUNTED" ]; then
+    echo "* root btrfs: $DEV (subvolid=5, RO -> /mnt/rootfs)"
+    SNAP_DIR=/mnt/rootfs/timeshift-btrfs/snapshots
+    if [ -d "$SNAP_DIR" ]; then
+        echo "* Timeshift snapshots found:"
+        for d in "$SNAP_DIR"/*/; do
+            [ -d "$d" ] || continue
+            echo "    - $(basename "$d")"
+        done
+        echo "  details: cat $SNAP_DIR/<name>/info.json"
+[ -d "$R/@" ] || { echo "! WARNING: @ subvolume MISSING at root (torn-down state)"; echo "! self-heal: rollback --recover"; }
+    else
+        echo "! no timeshift-btrfs/snapshots directory on disk root"
+    fi
+fi
+
+echo
+echo "* rescue shell ready (reboot: reboot | poweroff: poweroff)"
+# busybox setsid 支持 -c（接管控制台，开启 job control）；兜底重定向
+if /bin/busybox --list | grep -q '^setsid$'; then
+    exec setsid -c sh
+fi
+exec sh </dev/console >/dev/console 2>&1

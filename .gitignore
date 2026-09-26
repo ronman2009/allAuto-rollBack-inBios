@@ -1,0 +1,29 @@
+# 构建产物
+poc/build/
+poc/kernel-store/
+poc/dl/
+poc/extract/
+*.apk
+*.cpio
+*.cpio.gz
+*.efi
+*.ko
+*.o
+
+# initramfs 树中的生成物（源文件保留：init、bin/rollback、bin/reboot、bin/poweroff）
+poc/initramfs/modules/
+poc/initramfs/lib/
+poc/initramfs/bin/busybox
+poc/initramfs/bin/btrfs
+
+# 运行时杂物
+*.bak
+*.tmp
+
+# 工作区本地记忆（不入公开仓库）
+.workbuddy/
+
+# 工作区本地记忆（不入公开仓库）
+.workbuddy/
+.gh_token
+.device_code
