@@ -10,7 +10,11 @@
 # ============================================================
 set -eu
 [ "$(id -u)" -eq 0 ] || { echo "请用 sudo 运行"; exit 1; }
-SRC="$(cd "$(dirname "$0")/../host" && pwd)"
+SELF_DIR="$(cd "$(dirname "$0")" && pwd)"
+SRC=""
+[ -d "$SELF_DIR/../host" ] && SRC="$SELF_DIR/../host"
+[ -d "$SELF_DIR/host" ] && SRC="$SELF_DIR/host"
+[ -n "$SRC" ] || { echo "!! 找不到 host/ 组件目录"; exit 1; }
 
 install -m 755 "$SRC/rescue-esp-archive.sh" /usr/local/bin/rescue-esp-archive.sh
 install -m 644 "$SRC/00-rescue-esp-archive.hook" /usr/share/libalpm/hooks/00-rescue-esp-archive.hook
