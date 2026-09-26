@@ -1,8 +1,14 @@
 #!/bin/busybox sh
 # ============================================================
-# tui - POC phase 4 (v3: faithful design-B layout)
-# 居中固定宽度面板 + 外框 + 双栏分隔 + 全宽 header/footer 条
-# v2 fixes retained: stty raw/-echo, dynamic size, info.json parse
+# tui - POC phase 4 (v4: pure-ASCII, fully centered, per-row layout)
+# v4 fixes (20:46 live test):
+#   - ALL-ASCII box chars (+ - | > *) : UTF-8 borders garbled under
+#     C locale and rescue console. No unicode anywhere at runtime.
+#   - selected row no longer bleeds through the right column:
+#     each row is composed as one string |left|right| before print
+#   - panel height adapts to snapshot count; fully centered (h+v)
+#   - info.json OK/MISSING diagnostic line in detail pane
+# v2/v3 fixes retained: stty raw/-echo + sane on exit, per-row compose
 # ============================================================
 set -u
 export PATH=/bin
@@ -21,19 +27,20 @@ sz=$(stty size 2>/dev/null)
 [ -n "$sz" ] && { ROWS=${sz% *}; COLS=${sz#* }; }
 stty raw -echo 2>/dev/null
 
-# ---- panel geometry: centered, fixed width, like the mockup ----
+# ---- geometry: content-sized panel, centered both axes ----
+LR=$CNT; [ "$LR" -gt 12 ] && LR=12          # max visible list rows
+PH=$((LR + 8))                               # rows: top+hdr+blank+colhdr+LR+foot+note+bottom
+[ "$PH" -ge "$ROWS" ] && { LR=$((ROWS - 9)); PH=$((LR + 8)); }
 PW=$((COLS - 4)); [ "$PW" -gt 96 ] && PW=96
 PX=$(( (COLS - PW) / 2 + 1 ))
-PH=$((ROWS - 2))
 PY=$(( (ROWS - PH) / 2 + 1 ))
-LW=52                       # left column width (inside borders)
-RW=$((PW - LW - 2))         # right column width
-LR=$((PH - 6))              # list rows capacity
-[ "$LR" -lt 3 ] && LR=3
-DXL=$((LW + 2))             # detail text offset inside panel (after left border+col)
+LW=48
+RW=$((PW - LW - 2))
+CAP=$LR
 
 pad() { printf '%-*.*s' "$2" "$2" "$1"; }
-hline() { printf '%*s' "$1" '' | tr ' ' '─'; }
+hline() { printf '%*s' "$1" '' | tr ' ' '-'; }
+prow() { printf '\033[%d;%dH|%s|%s|' "$1" "$PX" "$(pad "$2" "$LW")" "$(pad "$3" "$RW")"; }
 
 # ---------- keys ----------
 getkey() {
@@ -74,8 +81,6 @@ for n in $NAMES; do CNT=$((CNT + 1)); done
 
 IDX=$CNT
 OFF=1
-[ "$CNT" -lt "$LR" ] && LR=$CNT
-CAP=$LR
 
 tag_of() {
     f=$(getfield tags "$SNAP_DIR/$1/info.json")
@@ -87,32 +92,24 @@ tag_of() {
 }
 has_esp() { ls "$SNAP_DIR/$1/@/.recovery/"esp-*.tar.gz >/dev/null 2>&1; }
 
-# one panel row: │left(pad LW)│right(pad RW)│
-prow() { # $1=row $2=left $3=right
-    printf '\033[%d;%dH│%s│%s│' "$1" "$PX" "$(pad "$2" "$LW")" "$(pad "$3" "$RW")"
-}
-
 # ---------- draw ----------
 draw() {
     SEL_NAME=$(eval echo \${$IDX})
     printf '\033[H\033[2J\033[?25l'
 
-    # top border
-    printf '\033[%d;%dH┌%s┐' "$PY" "$PX" "$(hline $((PW - 2)))"
-    # header bar (inverse, full panel width)
-    H=" ■ BTRFS RESCUE · /dev/nvme0n1p2 · ${CNT} snapshots · restore mode"
-    printf '\033[%d;%dH│\033[7m%s\033[0m│' "$((PY + 1))" "$PX" "$(pad "$H" $((PW - 2)))"
-    # blank row
+    printf '\033[%d;%dH+%s+' "$PY" "$PX" "$(hline $((PW - 2)))"
+    H=" BTRFS RESCUE - /dev/nvme0n1p2 - ${CNT} snapshots - restore mode"
+    printf '\033[%d;%dH|\033[7m%s\033[0m|' "$((PY + 1))" "$PX" "$(pad "$H" $((PW - 2)))"
     prow "$((PY + 2))" "" ""
-    # column header row
     prow "$((PY + 3))" " SNAPSHOT                       TAG        ESP" " DETAIL"
 
-    # list + detail rows
-    SV=$($BTRFS subvolume list $R 2>/dev/null | awk -v s="$SEL_NAME" '$0 ~ "path timeshift-btrfs/snapshots/"s"/@$" {print $2}')
     INFO="$SNAP_DIR/$SEL_NAME/info.json"
+    INFO_OK="-"
+    [ -f "$INFO" ] && INFO_OK="OK"
     C=$(getfield comments "$INFO"); [ -n "$C" ] || C="-"
     L=$(getfield live "$INFO"); [ -n "$L" ] || L="-"
-    if has_esp "$SEL_NAME"; then E="✔ tar.gz"; else E="-"; fi
+    SV=$($BTRFS subvolume list $R 2>/dev/null | awk -v s="$SEL_NAME" '$0 ~ "path timeshift-btrfs/snapshots/"s"/@$" {print $2}')
+    if has_esp "$SEL_NAME"; then E="* tar.gz"; else E="-"; fi
 
     k=0
     dr=0
@@ -123,43 +120,40 @@ draw() {
         r=$((PY + 4 + dr))
         T=$(tag_of "$n")
         if has_esp "$n"; then EE="tar.gz"; else EE="-"; fi
-        LEFT=" "
-        [ "$k" = "$IDX" ] && LEFT="▸"
-        LEFT="$LEFT $n"
-        if [ "$k" = "$IDX" ]; then
-            printf '\033[%d;%dH│\033[44m\033[1m%s│%s\033[0m│' "$r" "$PX" \
-                "$(pad "$LEFT" $LW)" "$(pad " " "$RW")"
-        else
-            prow "$r" "$LEFT" ""
-        fi
-        # detail column rows (right side, aligned with list rows)
+        LEFT="  $n"
+        [ "$k" = "$IDX" ] && LEFT="> $n"
+        RIGHT=""
         case $dr in
-            0) printf '\033[%d;%dH\033[96m DETAIL\033[0m' "$r" $((PX + DXL)) ;;
-            1) printf '\033[%d;%dH name    %s' "$r" $((PX + DXL)) "$SEL_NAME" ;;
-            2) printf '\033[%d;%dH tag     %s' "$r" $((PX + DXL)) "$(tag_of "$SEL_NAME")" ;;
-            3) printf '\033[%d;%dH comment %.20s' "$r" $((PX + DXL)) "$C" ;;
-            4) printf '\033[%d;%dH live    %s' "$r" $((PX + DXL)) "$L" ;;
-            5) printf '\033[%d;%dH subvol  %s' "$r" $((PX + DXL)) "${SV:-?}" ;;
-            6) printf '\033[%d;%dH esp     %s' "$r" $((PX + DXL)) "$E" ;;
+            0) RIGHT=" DETAIL" ;;
+            1) RIGHT=" name    $SEL_NAME" ;;
+            2) RIGHT=" tag     $(tag_of "$SEL_NAME")" ;;
+            3) RIGHT=" comment $(pad "$C" 18)" ;;
+            4) RIGHT=" live    $L" ;;
+            5) RIGHT=" subvol  ${SV:-?}" ;;
+            6) RIGHT=" esp     $E" ;;
+            7) RIGHT=" info.json $INFO_OK" ;;
         esac
+        if [ "$k" = "$IDX" ]; then
+            printf '\033[%d;%dH|\033[7m%s\033[0m|%s|' "$r" "$PX" "$(pad "$LEFT" "$LW")" "$(pad "$RIGHT" "$RW")"
+        else
+            prow "$r" "$LEFT" "$RIGHT"
+        fi
         dr=$((dr + 1))
     done
-    # fill remaining rows below list
     while [ "$dr" -lt "$CAP" ]; do
         prow "$((PY + 4 + dr))" "" ""
         dr=$((dr + 1))
     done
 
-    # footer hotkey bar (inverse, full width) + note row + bottom border
-    F=" ↑↓ select    ENTER restore    R recover    S shell    P poweroff"
-    printf '\033[%d;%dH│\033[7m%s\033[0m│' "$((PY + PH - 2))" "$PX" "$(pad "$F" $((PW - 2)))"
-    printf '\033[%d;%dH│%s│' "$((PY + PH - 1))" "$PX" "$(pad " restore = @ swap + ESP writeback. @home is NEVER touched." $((PW - 2)))"
-    printf '\033[%d;%dH└%s┘' "$((PY + PH))" "$PX" "$(hline $((PW - 2)))"
+    F=" Up/Dn select | ENTER restore | R recover | S shell | P poweroff"
+    printf '\033[%d;%dH|\033[7m%s\033[0m|' "$((PY + PH - 2))" "$PX" "$(pad "$F" $((PW - 2)))"
+    printf '\033[%d;%dH|%s|' "$((PY + PH - 1))" "$PX" "$(pad " restore = @ swap + ESP writeback. @home is NEVER touched." $((PW - 2)))"
+    printf '\033[%d;%dH+%s+' "$((PY + PH))" "$PX" "$(hline $((PW - 2)))"
 }
 
 confirm() {
-    printf '\033[%d;%dH\033[7m Restore %s ? (y/N) \033[0m' \
-        "$((PY + PH - 2))" "$PX" "$SEL_NAME"
+    printf '\033[%d;%dH|\033[7m%s\033[0m|' "$((PY + PH - 2))" "$PX" \
+        "$(pad " Restore $SEL_NAME ? (y/N) " $((PW - 2)))"
     K=$(dd bs=1 count=1 2>/dev/null)
     case "$K" in
         y|Y|"$(printf '\r')") return 0 ;;
