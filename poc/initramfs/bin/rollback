@@ -180,6 +180,7 @@ echo "* verified: new @ active (subvol id ${NEW_ID:-?})"
 ARCHIVE=$(ls -1 "$R/@/.recovery/"esp-*.tar.gz 2>/dev/null | tail -1)
 if [ -n "$ARCHIVE" ]; then
     echo "* ESP archive found in snapshot: $(basename "$ARCHIVE")"
+    mkdir -p /mnt/esp || fail "cannot create /mnt/esp mountpoint"
     if mount -t vfat /dev/nvme0n1p3 /mnt/esp 2>/dev/null; then
         tar czf "$PRE_DIR/esp-before-restore.tar.gz" -C /mnt/esp . 2>/dev/null \
             && echo "* current ESP backed up into pre-restore snapshot"

@@ -85,7 +85,7 @@ if [ -n "$MOUNTED" ]; then
             echo "    - $(basename "$d")"
         done
         echo "  details: cat $SNAP_DIR/<name>/info.json"
-[ -d "$R/@" ] || { echo "! WARNING: @ subvolume MISSING at root (torn-down state)"; echo "! self-heal: rollback --recover"; }
+[ -d /mnt/rootfs/@ ] || { echo "! WARNING: @ subvolume MISSING at root (torn-down state)"; echo "! self-heal: rollback --recover"; }
     else
         echo "! no timeshift-btrfs/snapshots directory on disk root"
     fi
