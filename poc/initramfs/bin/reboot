@@ -1,2 +1,5 @@
 #!/bin/busybox sh
+sync
+mount -o remount,ro /mnt/rootfs 2>/dev/null
+sync
 exec /bin/busybox reboot -f "$@"
