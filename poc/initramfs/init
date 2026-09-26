@@ -50,7 +50,7 @@ if [ -z "$DEV" ]; then
     echo "* blkid 未命中，尝试逐个探测 btrfs 盘根..."
     for cand in /dev/nvme*n*p* /dev/sd*[0-9]; do
         [ -b "$cand" ] || continue
-        if mount -t btrfs -o subvolid=5,ro,norecovery "$cand" /mnt/rootfs 2>/dev/null; then
+        if mount -t btrfs -o subvolid=5,ro,norecovery,norecovery "$cand" /mnt/rootfs 2>/dev/null; then
             if [ -d /mnt/rootfs/timeshift-btrfs ]; then
                 DEV="$cand"
                 MOUNTED=1
@@ -68,7 +68,7 @@ if [ -z "$DEV" ]; then
     cat /proc/partitions
     echo "! dropping to shell for manual inspection"
 elif [ -z "$MOUNTED" ]; then
-    if mount -t btrfs -o subvolid=5,ro,norecovery "$DEV" /mnt/rootfs 2>/dev/null; then
+    if mount -t btrfs -o subvolid=5,ro,norecovery,norecovery "$DEV" /mnt/rootfs 2>/dev/null; then
         MOUNTED=1
     else
         echo "! found $DEV but mount failed - dropping to shell"
