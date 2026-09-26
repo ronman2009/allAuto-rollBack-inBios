@@ -24,6 +24,8 @@ for item in scripts initramfs kernel-store; do
     rm -rf "$RESCUE_DIR/$item"
     cp -r "$BASE/poc/$item" "$RESCUE_DIR/$item"
 done
+rm -rf "$RESCUE_DIR/scripts/host"
+cp -r "$BASE/poc/host" "$RESCUE_DIR/scripts/host"
 # 清理不需要的中间物
 rm -rf "$RESCUE_DIR/initramfs/lib" "$RESCUE_DIR/initramfs/modules" \
        "$RESCUE_DIR/initramfs/bin/busybox" "$RESCUE_DIR/initramfs/bin/btrfs" 2>/dev/null || true
