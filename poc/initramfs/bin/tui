@@ -31,7 +31,7 @@ stty raw -echo 2>/dev/null
 PW=$((COLS - 4)); [ "$PW" -gt 96 ] && PW=96
 PX=$(( (COLS - PW) / 2 + 1 ))
 LW=48
-RW=$((PW - LW - 2))
+RW=$((PW - LW - 3))
 
 pad() { printf '%-*.*s' "$2" "$2" "$1"; }
 hline() { printf '%*s' "$1" '' | tr ' ' '-'; }
@@ -96,7 +96,7 @@ has_esp() { ls "$SNAP_DIR/$1/@/.recovery/"esp-*.tar.gz >/dev/null 2>&1; }
 
 # ---------- draw ----------
 draw() {
-    SEL_NAME=$(eval echo \${$IDX})
+    SEL_NAME=""
     printf '\033[H\033[2J\033[?25l'
 
     printf '\033[%d;%dH+%s+' "$PY" "$PX" "$(hline $((PW - 2)))"
@@ -123,7 +123,7 @@ draw() {
         T=$(tag_of "$n")
         if has_esp "$n"; then EE="tar.gz"; else EE="-"; fi
         LEFT="  $n"
-        [ "$k" = "$IDX" ] && LEFT="> $n"
+        [ "$k" = "$IDX" ] && { LEFT="> $n"; SEL_NAME="$n"; }
         RIGHT=""
         case $dr in
             0) RIGHT=" DETAIL" ;;
@@ -171,8 +171,7 @@ while :; do
         UP)   [ "$IDX" -gt 1 ] && { IDX=$((IDX - 1)); [ "$IDX" -lt "$OFF" ] && OFF=$IDX; } ;;
         DOWN) [ "$IDX" -lt "$CNT" ] && { IDX=$((IDX + 1)); [ "$IDX" -ge $((OFF + CAP)) ] && OFF=$((IDX - CAP + 1)); } ;;
         ENTER)
-            SEL_NAME=$(eval echo \${$IDX})
-            if confirm; then
+            if [ -n "$SEL_NAME" ] && confirm; then
                 cleanup_tty
                 printf '\033[2J\033[H\033[?25h'
                 exec /bin/rollback "$SEL_NAME" --yes
