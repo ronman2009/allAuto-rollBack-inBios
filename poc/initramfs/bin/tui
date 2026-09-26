@@ -103,15 +103,7 @@ draw() {
     H=" BTRFS RESCUE - /dev/nvme0n1p2 - ${CNT} snapshots - restore mode"
     printf '\033[%d;%dH|\033[7m%s\033[0m|' "$((PY + 1))" "$PX" "$(pad "$H" $((PW - 2)))"
     prow "$((PY + 2))" "" ""
-    prow "$((PY + 3))" " SNAPSHOT                       TAG        ESP" " DETAIL"
-
-    INFO="$SNAP_DIR/$SEL_NAME/info.json"
-    INFO_OK="-"
-    [ -f "$INFO" ] && INFO_OK="OK"
-    C=$(getfield comments "$INFO"); [ -n "$C" ] || C="-"
-    L=$(getfield live "$INFO"); [ -n "$L" ] || L="-"
-    SV=$($BTRFS subvolume list $R 2>/dev/null | awk -v s="$SEL_NAME" '$0 ~ "path timeshift-btrfs/snapshots/"s"/@$" {print $2}')
-    if has_esp "$SEL_NAME"; then E="* tar.gz"; else E="-"; fi
+    prow "$((PY + 3))" " SNAPSHOT                       TAG        ESP" ""
 
     k=0
     dr=0
@@ -123,7 +115,16 @@ draw() {
         T=$(tag_of "$n")
         if has_esp "$n"; then EE="tar.gz"; else EE="-"; fi
         LEFT="  $n"
-        [ "$k" = "$IDX" ] && { LEFT="> $n"; SEL_NAME="$n"; }
+        if [ "$k" = "$IDX" ]; then
+            LEFT="> $n"
+            SEL_NAME="$n"
+            INFO="$SNAP_DIR/$n/info.json"
+            INFO_OK="-"; [ -f "$INFO" ] && INFO_OK="OK"
+            C=$(getfield comments "$INFO"); [ -n "$C" ] || C="-"
+            L=$(getfield live "$INFO"); [ -n "$L" ] || L="-"
+            SV=$($BTRFS subvolume list $R 2>/dev/null | awk -v s="$n" '$0 ~ "path timeshift-btrfs/snapshots/"s"/@$" {print $2}')
+            if has_esp "$n"; then E="* tar.gz"; else E="-"; fi
+        fi
         RIGHT=""
         case $dr in
             0) RIGHT=" DETAIL" ;;
@@ -174,11 +175,15 @@ while :; do
             if [ -n "$SEL_NAME" ] && confirm; then
                 cleanup_tty
                 printf '\033[2J\033[H\033[?25h'
+                ROLLBACK_FROM=tui
+                export ROLLBACK_FROM
                 exec /bin/rollback "$SEL_NAME" --yes
             fi ;;
         RECOVER)
             cleanup_tty
             printf '\033[2J\033[H\033[?25h'
+            ROLLBACK_FROM=tui
+            export ROLLBACK_FROM
             exec /bin/rollback --recover "$SEL_NAME" --yes ;;
         SHELL)
             cleanup_tty
