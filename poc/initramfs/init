@@ -22,9 +22,9 @@ echo "=============================================="
 
 ROOT_UUID=d505eb2e-6552-43d0-aa7a-529d4e046abd
 
-# 1. NVMe 驱动是模块(CONFIG_BLK_DEV_NVME=m)，initramfs 必须自加载
-echo "* loading nvme modules..."
-for m in nvme-keyring nvme-auth nvme-core nvme; do
+# 1. NVMe 与 FAT 驱动是模块(CONFIG_BLK_DEV_NVME=m / VFAT_FS=m)，initramfs 必须自加载
+echo "* loading modules..."
+for m in nvme-keyring nvme-auth nvme-core nvme fat vfat; do
     if insmod "/modules/$m.ko" 2>/dev/null; then
         echo "    + $m"
     else

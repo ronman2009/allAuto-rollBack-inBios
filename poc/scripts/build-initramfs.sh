@@ -44,7 +44,7 @@ KVER=$(cat "$STORE/RESCUE_KVER")
 KERNEL="$STORE/vmlinuz"
 echo "* release 模式: 固化内核 $KVER (kernel-store)"
 mkdir -p "$POC_DIR/initramfs/modules"
-for m in nvme-keyring nvme-auth nvme-core nvme; do
+for m in nvme-keyring nvme-auth nvme-core nvme fat vfat; do
     [ -f "$STORE/modules/$m.ko" ] || { echo "!! 缺 $STORE/modules/$m.ko"; exit 1; }
     cp "$STORE/modules/$m.ko" "$POC_DIR/initramfs/modules/$m.ko"
 done

@@ -17,11 +17,16 @@ cp "$VMLINUZ" "$STORE/vmlinuz"
 echo "$KVER" > "$STORE/RESCUE_KVER"
 echo "* 内核已钉入: $VMLINUZ ($KVER)"
 
-# 2. 钉 NVMe 模块（解压为裸 .ko，与 initramfs 用法一致）
+# 2. 钉 NVMe 模块（解压为裸 .ko，与 initramfs 用法一致）+ FAT/vfat（ESP 挂载）
 for m in nvme-keyring nvme-auth nvme-core nvme; do
     src="/lib/modules/$KVER/kernel/drivers/nvme/common/$m.ko.zst"
     [ -f "$src" ] || src="/lib/modules/$KVER/kernel/drivers/nvme/host/$m.ko.zst"
     [ -f "$src" ] || src=$(modinfo -n "$m" 2>/dev/null)
+    zstd -d -q -f "$src" -o "$STORE/modules/$m.ko"
+    echo "  + $m.ko"
+done
+for m in fat vfat; do
+    src=$(modinfo -n "$m" 2>/dev/null)
     zstd -d -q -f "$src" -o "$STORE/modules/$m.ko"
     echo "  + $m.ko"
 done
