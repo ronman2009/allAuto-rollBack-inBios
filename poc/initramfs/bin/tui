@@ -24,7 +24,7 @@ trap cleanup_tty EXIT INT TERM
 
 ROWS=24; COLS=80
 sz=$(stty size 2>/dev/null)
-[ -n "$sz" ] && { ROWS=${sz% *}; COLS=${sz#* }; }
+[ -n "${sz:-}" ] && { ROWS=${sz% *}; COLS=${sz#* }; }
 stty raw -echo 2>/dev/null
 
 # ---- geometry: panel width (height needs CNT, computed after enumeration) ----
