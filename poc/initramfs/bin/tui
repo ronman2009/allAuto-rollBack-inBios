@@ -190,11 +190,15 @@ while :; do
             if [ -n "$SEL_NAME" ] && confirm; then
                 cleanup_tty
                 printf '\033[2J\033[H\033[?25h'
+                ROLLBACK_FROM=tui
+                export ROLLBACK_FROM
                 exec /bin/rollback "$SEL_NAME" --yes
             fi ;;
         RECOVER)
             cleanup_tty
             printf '\033[2J\033[H\033[?25h'
+            ROLLBACK_FROM=tui
+            export ROLLBACK_FROM
             exec /bin/rollback --recover "$SEL_NAME" --yes ;;
         SHELL)
             cleanup_tty
