@@ -1,0 +1,150 @@
+#!/bin/busybox sh
+# ============================================================
+# tui - POC phase 4 (design B: two-pane, white hotkey bar)
+# ANSI 16-color, 80x24 console. ASCII-only at runtime.
+# Keys: UP/DOWN select, ENTER restore, R recover, S shell, P poweroff
+# ============================================================
+set -u
+export PATH=/bin
+export TZ=CST-8
+R=/mnt/rootfs
+SNAP_DIR=$R/timeshift-btrfs/snapshots
+BTRFS=/bin/btrfs
+
+[ -d "$SNAP_DIR" ] || { echo "no snapshots dir (reboot into rescue)"; exit 1; }
+
+# ---------- helpers ----------
+getkey() {
+    KEY=""
+    K=$(dd bs=1 count=1 2>/dev/null)
+    case "$K" in
+        "$(printf '\033')")
+            K2=$(dd bs=1 count=1 2>/dev/null)
+            if [ "$K2" = "[" ]; then
+                K3=$(dd bs=1 count=1 2>/dev/null)
+                case "$K3" in
+                    A) KEY=UP ;;
+                    B) KEY=DOWN ;;
+                    *) KEY=OTHER ;;
+                esac
+            fi ;;
+        "$(printf '\r')") KEY=ENTER ;;
+        "$(printf '\n')") KEY=ENTER ;;
+        R) KEY=RECOVER ;;
+        r) KEY=RECOVER ;;
+        S) KEY=SHELL ;;
+        s) KEY=SHELL ;;
+        P) KEY=POWEROFF ;;
+        p) KEY=POWEROFF ;;
+        q) KEY=SHELL ;;
+        Q) KEY=SHELL ;;
+    esac
+}
+
+# extract a string field from info.json (busybox-safe parsing)
+getfield() {
+    # $1=field $2=info.json
+    grep -m1 "\"$1\"" "$2" 2>/dev/null | sed 's/.*:[[:space:]]*"\{0,1\}\([^",}]*\)"\{0,1\}[[:space:]]*$/\1/' | tr -d ' '
+}
+
+# ---------- collect snapshots ----------
+NAMES=""
+for d in "$SNAP_DIR"/*/; do
+    [ -d "${d}@" ] || continue
+    NAMES="$NAMES $(basename "$d")"
+done
+[ -n "$NAMES" ] || { echo "no snapshots found"; exit 1; }
+CNT=0
+for n in $NAMES; do CNT=$((CNT + 1)); done
+
+IDX=$CNT   # default: newest
+
+tag_of() {
+    # $1=name -> tag string (from info.json)
+    f=$(getfield tags "$SNAP_DIR/$1/info.json")
+    case "$f" in
+        ondemand) echo "ondemand" ;;
+        D) echo "daily" ;;
+        W) echo "weekly" ;;
+        M) echo "monthly" ;;
+        B) echo "boot" ;;
+        "") echo "-" ;;
+        *) echo "$f" ;;
+    esac
+}
+
+has_esp() {
+    ls "$SNAP_DIR/$1/@/.recovery/"esp-*.tar.gz >/dev/null 2>&1
+}
+
+# ---------- draw ----------
+draw() {
+    printf '\033[H\033[2J\033[?25l'
+    SEL_NAME=$(eval echo \${$IDX})
+    # header
+    printf '\033[1;1H\033[7m BTRFS RESCUE \033[0m\033[7m · root=/dev/nvme0n1p2 · %d snapshots · mode=%s \033[0m' "$CNT" "${MODE:-restore}"
+    # column header
+    printf '\033[3;2H SNAPSHOT                       TAG        ESP'
+    # list
+    k=0
+    for n in $NAMES; do
+        k=$((k + 1))
+        T=$(tag_of "$n")
+        if has_esp "$n"; then E="tar.gz"; else E="-"; fi
+        if [ "$k" = "$IDX" ]; then
+            printf '\033[%d;2H\033[44m\033[1m▸ %-28s %-10s %-8s\033[0m' $((k + 3)) "$n" "$T" "$E"
+        else
+            printf '\033[%d;2H  %-28s %-10s %-8s' $((k + 3)) "$n" "$T" "$E"
+        fi
+    done
+    # right detail pane (fixed x=58)
+    INFO="$SNAP_DIR/$SEL_NAME/info.json"
+    printf '\033[3;58H\033[36mDETAIL\033[0m'
+    C=$(getfield comments "$INFO"); [ -n "$C" ] || C="-"
+    L=$(getfield live "$INFO"); [ -n "$L" ] || L="-"
+    SV=$($BTRFS subvolume list $R 2>/dev/null | awk -v s="$SEL_NAME" '$0 ~ "path timeshift-btrfs/snapshots/"s"/@$" {print $2}')
+    printf '\033[4;58Hname     %s' "$SEL_NAME"
+    printf '\033[5;58Htag      %s' "$(tag_of "$SEL_NAME")"
+    printf '\033[6;58Hcomment  %.22s' "$C"
+    printf '\033[7;58Hlive     %s' "$L"
+    printf '\033[8;58Hsubvol   %s' "${SV:-?}"
+    if has_esp "$SEL_NAME"; then printf '\033[9;58Hesp      tar.gz OK'; else printf '\033[9;58Hesp      -'; fi
+    # footer hotkey bar: bright white (user spec)
+    printf '\033[23;1H\033[47m\033[30m↑↓ select    ENTER restore    R recover    S shell    P poweroff\033[0m'
+    printf '\033[24;1H\033[47m\033[30mrestore = @ swap + ESP writeback. @home is NEVER touched.\033[0m'
+}
+
+confirm() {
+    printf '\033[21;2H\033[47m\033[30m Restore %s ? (y/N) \033[0m' "$SEL_NAME"
+    K=$(dd bs=1 count=1 2>/dev/null)
+    case "$K" in
+        y|Y|"$(printf '\r')") return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+# ---------- main loop ----------
+while :; do
+    draw
+    getkey
+    case "$KEY" in
+        UP)   [ "$IDX" -gt 1 ] && IDX=$((IDX - 1)) ;;
+        DOWN) [ "$IDX" -lt "$CNT" ] && IDX=$((IDX + 1)) ;;
+        ENTER)
+            SEL_NAME=$(eval echo \${$IDX})
+            if confirm; then
+                printf '\033[2J\033[H\033[?25h'
+                exec /bin/rollback "$SEL_NAME" --yes
+            fi ;;
+        RECOVER)
+            printf '\033[2J\033[H\033[?25h'
+            exec /bin/rollback --recover "$SEL_NAME" --yes ;;
+        SHELL)
+            printf '\033[2J\033[H\033[?25h'
+            echo "* shell (type 'tui' to return)"
+            exec /bin/sh ;;
+        POWEROFF)
+            printf '\033[2J\033[H\033[?25h'
+            exec /bin/busybox poweroff -f ;;
+    esac
+done

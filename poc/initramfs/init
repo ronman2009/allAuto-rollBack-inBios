@@ -93,6 +93,12 @@ fi
 
 echo
 echo "* rescue shell ready (reboot: reboot | poweroff: poweroff)"
+# ---- UI mode: etc/rescue.conf (UI=tui|cli) ----
+UI="${UI:-cli}"
+[ -f /etc/rescue.conf ] && . /etc/rescue.conf 2>/dev/null
+if [ "${UI:-cli}" = "tui" ] && [ -x /bin/tui ]; then
+    exec /bin/tui
+fi
 # busybox setsid 支持 -c（接管控制台，开启 job control）；兜底重定向
 if /bin/busybox --list | grep -q '^setsid$'; then
     exec setsid -c sh

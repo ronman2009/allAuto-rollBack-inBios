@@ -31,11 +31,17 @@ for t in mv awk grep date; do
 done
 $BTRFS --version >/dev/null 2>&1 || fail "btrfs not executable: $BTRFS"
 
-# ---- 1. mode ----
+# ---- 1. parse args (order-independent): [--recover] [snapshot] [--yes] ----
 MODE="restore"
-if [ "${1:-}" = "--recover" ]; then
-    MODE="recover"
-fi
+SEL=""
+YESFLAG=""
+for a in "$@"; do
+    case "$a" in
+        --recover) MODE="recover" ;;
+        --yes) YESFLAG=1 ;;
+        *) SEL="$a" ;;
+    esac
+done
 
 # ---- 2. list candidates ----
 i=0
@@ -50,7 +56,7 @@ done
 [ -n "$LIST" ] || fail "no snapshots with @ subvolume found"
 
 # ---- 3. select: index or name, Enter=newest ----
-SEL="${2:-}"
+SEL="${SEL:-}"
 if [ -z "$SEL" ]; then
     printf "Select snapshot [1-%d, Enter=newest]: " "$i"
     read PICK
@@ -106,7 +112,7 @@ cat <<EOF
 EOF
 fi
 
-if [ "${3:-}" != "--yes" ]; then
+if [ -z "$YESFLAG" ]; then
     printf "Proceed? (y/N): "
     read ANSWER
     case "$ANSWER" in

@@ -33,6 +33,7 @@ if [ ! -x "$POC_DIR/initramfs/bin/busybox" ]; then
     chmod 755 "$POC_DIR/initramfs/bin/busybox"
 fi
 chmod 755 "$POC_DIR/initramfs/init"
+[ -f "$POC_DIR/initramfs/bin/tui" ] && chmod 755 "$POC_DIR/initramfs/bin/tui"
 
 # 2. 内核与 NVMe 模块：release 模式 = 只认 kernel-store（写死，与 Manjaro 升级解耦）
 STORE="$POC_DIR/kernel-store"
@@ -110,6 +111,10 @@ gzip -dc "$BUILD/initramfs.cpio.gz" | cpio -t 2>/dev/null | grep -qx "bin/btrfs"
     || { echo "!! 自检失败: 缺 btrfs-progs"; exit 1; }
 gzip -dc "$BUILD/initramfs.cpio.gz" | cpio -t 2>/dev/null | grep -qx "bin/rollback" \
     || { echo "!! 自检失败: 缺 rollback"; exit 1; }
+gzip -dc "$BUILD/initramfs.cpio.gz" | cpio -t 2>/dev/null | grep -qx "bin/tui" \
+    || { echo "!! 自检失败: 缺 tui"; exit 1; }
+gzip -dc "$BUILD/initramfs.cpio.gz" | cpio -t 2>/dev/null | grep -qx "etc/rescue.conf" \
+    || { echo "!! 自检失败: 缺 etc/rescue.conf (UI 双模配置)"; exit 1; }
 python3 "$POC_DIR/scripts/verify-uki.py" "$BUILD/recovery.efi"
 echo "* 自检全部通过"
 
